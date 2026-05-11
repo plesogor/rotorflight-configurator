@@ -88,12 +88,15 @@ STM32DFU_protocol.prototype.connect = function (device, hex, options, callback) 
     // reset progress bar to initial state
     TABS.firmware_flasher.flashingMessage(null, TABS.firmware_flasher.FLASH_MESSAGE_TYPES.NEUTRAL).flashProgress(0);
 
+    GUI.connect_lock = true;
+
     chrome.usb.getDevices(device, function (result) {
         if (result.length) {
             console.log('USB DFU detected with ID: ' + result[0].device);
 
             self.openDevice(result[0]);
         } else {
+            GUI.connect_lock = false;
             console.log('USB DFU not found');
             GUI.log(i18n.getMessage('stm32UsbDfuNotFound'));
         }
@@ -106,6 +109,7 @@ STM32DFU_protocol.prototype.openDevice = function (device) {
     chrome.usb.openDevice(device, function (handle) {
         if (checkChromeRuntimeError()) {
             console.log('Failed to open USB device!');
+            GUI.connect_lock = false;
             GUI.log(i18n.getMessage('usbDeviceOpenFail'));
             if(GUI.operating_system === 'Linux') {
                 GUI.log(i18n.getMessage('usbDeviceUdevNotice'));
@@ -147,6 +151,7 @@ STM32DFU_protocol.prototype.claimInterface = function (interfaceNumber) {
         if (checkChromeRuntimeError() && (GUI.operating_system !== "MacOS")) {
             console.log('Failed to claim USB device!');
             self.cleanup();
+            return;
         }
 
         console.log('Claimed interface: ' + interfaceNumber);
@@ -435,8 +440,10 @@ STM32DFU_protocol.prototype.controlTransfer = function (direction, request, valu
             'length':       length,
             'timeout':      timeout
         }, function (result) {
-            if (checkChromeRuntimeError()) {
+            if (checkChromeRuntimeError() || !result || !result.data) {
                 console.log('USB controlTransfer IN failed for request ' + request + '!');
+                callback(new Uint8Array(), result?.resultCode);
+                return;
             }
             if (result.resultCode) console.log('USB transfer result code: ' + result.resultCode);
 
@@ -1053,7 +1060,10 @@ STM32DFU_protocol.prototype.leave = function () {
             // 'downloading' 0 bytes to the program start address followed by a GETSTATUS is used to trigger DFU exit on STM32
             self.controlTransfer('out', self.request.DNLOAD, 0, 0, 0, 0, function () {
                 self.controlTransfer('in', self.request.GETSTATUS, 0, 0, 6, 0, function () {
-                    self.cleanup();
+                    // Some STM32 bootloaders wait for a USB reset before leaving DFU after manifestation.
+                    self.resetDevice(function () {
+                        self.cleanup();
+                    });
                 });
             });
         });

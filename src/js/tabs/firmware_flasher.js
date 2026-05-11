@@ -1012,13 +1012,25 @@ tab.initialize = function (callback) {
         });
 
         const exitDfuElement = $('a.exit_dfu');
-        exitDfuElement.click(function () {
+        exitDfuElement.click(function (e) {
+            e.preventDefault();
+
             if (!$(this).hasClass('disabled')) {
                 if (!GUI.connect_lock) { // button disabled while flashing is in progress
                     try {
-                        STM32DFU.connect(usbDevices, self.parsed_hex, { exitDfu: true });
-                    } catch (e) {
-                        console.log(`Exiting DFU failed: ${e.message}`);
+                        exitDfuElement.addClass('disabled');
+                        self.enableFlashing(false);
+                        GUI.log(i18n.getMessage('deviceRebooting'));
+                        self.flashingMessage(i18n.getMessage('deviceRebooting'), self.FLASH_MESSAGE_TYPES.NEUTRAL);
+                        STM32DFU.connect(usbDevices, null, { exitDfu: true }, async function () {
+                            if (dfuHelperStatusSupported) {
+                                await refreshDfuHelperStatus();
+                            }
+                        });
+                    } catch (err) {
+                        GUI.connect_lock = false;
+                        exitDfuElement.removeClass('disabled');
+                        console.log(`Exiting DFU failed: ${err.message}`);
                     }
                 }
             }
