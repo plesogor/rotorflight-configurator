@@ -278,6 +278,86 @@ function checkSTM32DFUDevicePresent() {
     });
 }
 
+function findSTM32DFUDeviceInstanceId(output) {
+    const lines = output.split(/\r?\n/);
+    let currentInstanceId = null;
+
+    for (const line of lines) {
+        const instanceMatch = line.match(/^\s*Instance ID:\s*(.+?)\s*$/i);
+        if (instanceMatch) {
+            currentInstanceId = instanceMatch[1];
+        }
+
+        if (currentInstanceId && line.toLowerCase().includes('vid_0483&pid_df11')) {
+            return currentInstanceId;
+        }
+    }
+
+    return null;
+}
+
+function rebootSTM32DFUDevice() {
+    return new Promise((resolve) => {
+        if (!isWindows()) {
+            resolve({
+                supported: false,
+                rebooted: false,
+                message: 'Unsupported platform',
+            });
+            return;
+        }
+
+        execFile(
+            getPnputilPath(),
+            ['/enum-devices', '/connected'],
+            { windowsHide: true },
+            (enumError, stdout, enumStderr) => {
+                if (enumError) {
+                    resolve({
+                        supported: true,
+                        rebooted: false,
+                        message: enumStderr || enumError.message,
+                    });
+                    return;
+                }
+
+                const instanceId = findSTM32DFUDeviceInstanceId(stdout);
+
+                if (!instanceId) {
+                    resolve({
+                        supported: true,
+                        rebooted: false,
+                        message: 'No STM32 DFU device detected',
+                    });
+                    return;
+                }
+
+                execFile(
+                    getPnputilPath(),
+                    ['/restart-device', instanceId],
+                    { windowsHide: true },
+                    (restartError, restartStdout, restartStderr) => {
+                        if (restartError) {
+                            resolve({
+                                supported: true,
+                                rebooted: false,
+                                message: restartStderr || restartStdout || restartError.message,
+                            });
+                            return;
+                        }
+
+                        resolve({
+                            supported: true,
+                            rebooted: true,
+                            message: restartStdout || 'STM32 DFU device restart requested',
+                        });
+                    }
+                );
+            }
+        );
+    });
+}
+
 
 function installSTM32DFUDriver() {
     return new Promise((resolve) => {
@@ -362,4 +442,5 @@ export {
     getSTM32DFUStatus,
     getSTM32DFUDriverLicenseText,
     installSTM32DFUDriver,
+    rebootSTM32DFUDevice,
 };
