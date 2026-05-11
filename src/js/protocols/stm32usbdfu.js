@@ -130,7 +130,25 @@ STM32DFU_protocol.prototype.findAndOpenDevice = function () {
         return;
     }
 
+    let completed = false;
+    const failTimer = setTimeout(function () {
+        if (completed) {
+            return;
+        }
+
+        completed = true;
+        console.log('USB DFU findDevices timed out');
+        self.openDeviceFailed();
+    }, 1500);
+
     chrome.usb.findDevices(self.device, function (handles) {
+        if (completed) {
+            return;
+        }
+
+        completed = true;
+        clearTimeout(failTimer);
+
         if (checkChromeRuntimeError() || !handles?.length) {
             self.openDeviceFailed();
             return;
@@ -189,7 +207,7 @@ STM32DFU_protocol.prototype.claimInterface = function (interfaceNumber) {
         console.log('Claimed interface: ' + interfaceNumber);
 
         if (self.options.exitDfu) {
-            self.leave();
+            self.exitDfu();
         } else {
             self.upload_procedure(0);
         }
@@ -1072,6 +1090,41 @@ STM32DFU_protocol.prototype.upload_procedure = function (step) {
             break;
         }
     }
+};
+
+STM32DFU_protocol.prototype.exitDfu = function () {
+    const self = this;
+    let finished = false;
+    let resetStarted = false;
+
+    function finish() {
+        if (finished) {
+            return;
+        }
+
+        finished = true;
+        clearTimeout(resetTimer);
+        clearTimeout(finishTimer);
+        self.cleanup();
+    }
+
+    function reset() {
+        if (resetStarted) {
+            return;
+        }
+
+        resetStarted = true;
+        self.resetDevice(finish);
+    }
+
+    const resetTimer = setTimeout(reset, 250);
+    const finishTimer = setTimeout(function () {
+        console.log('DFU exit timed out, cleaning up');
+        finish();
+    }, 3000);
+
+    // Standard DFU detach request followed by a USB reset exits firmware-launched STM32 DFU without needing firmware hex data.
+    self.controlTransfer('out', self.request.DETACH, 1000, 0, 0, 0, reset, 1000);
 };
 
 STM32DFU_protocol.prototype.leave = function () {
