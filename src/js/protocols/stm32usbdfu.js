@@ -94,26 +94,33 @@ STM32DFU_protocol.prototype.connect = function (device, hex, options, callback) 
         if (result.length) {
             console.log('USB DFU detected with ID: ' + result[0].device);
 
-            self.openDevice(result[0]);
+            self.openDevice(result[0], result.slice(1));
         } else {
             GUI.connect_lock = false;
             console.log('USB DFU not found');
             GUI.log(i18n.getMessage('stm32UsbDfuNotFound'));
+            self.callback?.({ success: false });
         }
     });
 };
 
-STM32DFU_protocol.prototype.openDevice = function (device) {
+STM32DFU_protocol.prototype.openDevice = function (device, remainingDevices = []) {
     var self = this;
 
     chrome.usb.openDevice(device, function (handle) {
         if (checkChromeRuntimeError()) {
             console.log('Failed to open USB device!');
+            if (remainingDevices.length) {
+                self.openDevice(remainingDevices[0], remainingDevices.slice(1));
+                return;
+            }
+
             GUI.connect_lock = false;
             GUI.log(i18n.getMessage('usbDeviceOpenFail'));
             if(GUI.operating_system === 'Linux') {
                 GUI.log(i18n.getMessage('usbDeviceUdevNotice'));
             }
+            self.callback?.({ success: false });
             return;
         }
 
@@ -1081,7 +1088,7 @@ STM32DFU_protocol.prototype.cleanup = function () {
 
     console.log('Script finished after: ' + (timeSpent / 1000) + ' seconds');
 
-    self.callback?.();
+    self.callback?.({ success: true });
 };
 
 // initialize object

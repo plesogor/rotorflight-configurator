@@ -1026,10 +1026,11 @@ tab.initialize = function (callback) {
                             if (dfuHelperStatusSupported) {
                                 await refreshDfuHelperStatus();
                             }
+                            updateDfuControls();
                         });
                     } catch (err) {
                         GUI.connect_lock = false;
-                        exitDfuElement.removeClass('disabled');
+                        updateDfuControls();
                         console.log(`Exiting DFU failed: ${err.message}`);
                     }
                 }
@@ -1038,20 +1039,21 @@ tab.initialize = function (callback) {
 
         const detectBoardElement = $('a.detect-board');
 
-        // Notably, the portPickerElement "change" will be triggered repeatedly as it is setup on a timer in the port_handler
-        portPickerElement.on("change", function () {
-            if (!GUI.connect_lock) {
-                if ($('option:selected', this).data().isDFU) {
-                    exitDfuElement.removeClass('disabled');
-                    detectBoardElement.toggleClass('disabled', true); // can't detect board in DFU mode.
-                } else {
-                    $("a.load_remote_file").removeClass('disabled');
-                    $("a.load_file").removeClass('disabled');
-                    detectBoardElement.toggleClass('disabled', false);
-                    exitDfuElement.addClass('disabled');
-                }
+        function updateDfuControls() {
+            const isDfu = $('option:selected', portPickerElement).data().isDFU;
+
+            exitDfuElement.toggleClass('disabled', !isDfu || GUI.connect_lock);
+            detectBoardElement.toggleClass('disabled', !!isDfu || GUI.connect_lock);
+
+            if (!isDfu && !GUI.connect_lock) {
+                $("a.load_remote_file").removeClass('disabled');
+                $("a.load_file").removeClass('disabled');
             }
-        });
+        }
+
+        // Notably, the portPickerElement "change" will be triggered repeatedly as it is setup on a timer in the port_handler
+        portPickerElement.on("change", updateDfuControls);
+        updateDfuControls();
 
         let board_auto_detect = (function() {
             let targetAvailable = false;
