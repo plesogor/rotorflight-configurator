@@ -11,7 +11,6 @@ import {
     checkSTM32DFUDevicePresent,
     getSTM32DFUDriverLicenseText,
     installSTM32DFUDriver,
-    rebootSTM32DFUDevice,
 } from '@/js/utils/stm32DfuDriver.js';
 function supportsDfuHelperStatus() {
     return GUI.operating_system === 'Windows';
@@ -1013,7 +1012,7 @@ tab.initialize = function (callback) {
         });
 
         const exitDfuElement = $('a.exit_dfu');
-        exitDfuElement.click(async function (e) {
+        exitDfuElement.click(function (e) {
             e.preventDefault();
 
             if (!$(this).hasClass('disabled')) {
@@ -1023,22 +1022,6 @@ tab.initialize = function (callback) {
                         self.enableFlashing(false);
                         GUI.log(i18n.getMessage('deviceRebooting'));
                         self.flashingMessage(i18n.getMessage('deviceRebooting'), self.FLASH_MESSAGE_TYPES.NEUTRAL);
-
-                        if (dfuHelperStatusSupported) {
-                            GUI.connect_lock = true;
-                            const result = await rebootSTM32DFUDevice();
-                            GUI.connect_lock = false;
-
-                            if (result.rebooted) {
-                                GUI.log(result.message);
-                                await refreshDfuHelperStatus();
-                                updateDfuControls();
-                                return;
-                            }
-
-                            GUI.log(`Windows DFU restart failed: ${result.message}`);
-                            updateDfuControls();
-                        }
 
                         STM32DFU.connect(usbDevices, null, { exitDfu: true }, async function () {
                             if (dfuHelperStatusSupported) {

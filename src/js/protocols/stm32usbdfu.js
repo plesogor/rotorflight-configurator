@@ -16,6 +16,7 @@ var STM32DFU_protocol = function () {
     this.verify_hex = [];
 
     this.handle = null; // connection handle
+    this.interfaceClaimed = false;
 
     this.request = {
         DETACH:     0x00, // OUT, Requests the device to leave DFU mode and enter the application.
@@ -70,6 +71,7 @@ STM32DFU_protocol.prototype.connect = function (device, hex, options, callback) 
     self.hex = hex;
     self.callback = callback;
     self.device = device;
+    self.interfaceClaimed = false;
 
     self.options = {
         erase_chip: false,
@@ -90,6 +92,11 @@ STM32DFU_protocol.prototype.connect = function (device, hex, options, callback) 
     TABS.firmware_flasher.flashingMessage(null, TABS.firmware_flasher.FLASH_MESSAGE_TYPES.NEUTRAL).flashProgress(0);
 
     GUI.connect_lock = true;
+
+    if (self.options.exitDfu && chrome.usb.findDevices) {
+        self.findAndOpenDevice();
+        return;
+    }
 
     chrome.usb.getDevices(device, function (result) {
         if (result.length) {
@@ -172,22 +179,35 @@ STM32DFU_protocol.prototype.onDeviceOpened = function (handle) {
 
     GUI.log(i18n.getMessage('usbDeviceOpened', handle.handle.toString()));
     console.log('Device opened with Handle ID: ' + handle.handle);
-    this.claimInterface(0);
+
+    if (this.options.exitDfu) {
+        this.resetDfuDevice();
+    } else {
+        this.claimInterface(0);
+    }
 };
 
-STM32DFU_protocol.prototype.closeDevice = function () {
+STM32DFU_protocol.prototype.closeDevice = function (callback) {
     var self = this;
 
-    chrome.usb.closeDevice(this.handle, function closed() {
+    if (!this.handle) {
+        callback?.();
+        return;
+    }
+
+    const handle = this.handle;
+
+    chrome.usb.closeDevice(handle, function closed() {
         if (checkChromeRuntimeError()) {
             console.log('Failed to close USB device!');
             GUI.log(i18n.getMessage('usbDeviceCloseFail'));
         }
 
         GUI.log(i18n.getMessage('usbDeviceClosed'));
-        console.log('Device closed with Handle ID: ' + self.handle.handle);
+        console.log('Device closed with Handle ID: ' + handle.handle);
 
         self.handle = null;
+        callback?.();
     });
 };
 
@@ -205,22 +225,25 @@ STM32DFU_protocol.prototype.claimInterface = function (interfaceNumber) {
         }
 
         console.log('Claimed interface: ' + interfaceNumber);
+        self.interfaceClaimed = true;
 
-        if (self.options.exitDfu) {
-            self.exitDfu();
-        } else {
-            self.upload_procedure(0);
-        }
+        self.upload_procedure(0);
     });
 };
 
-STM32DFU_protocol.prototype.releaseInterface = function (interfaceNumber) {
+STM32DFU_protocol.prototype.releaseInterface = function (interfaceNumber, callback) {
     var self = this;
+
+    if (!this.handle) {
+        callback?.();
+        return;
+    }
 
     chrome.usb.releaseInterface(this.handle, interfaceNumber, function released() {
         console.log('Released interface: ' + interfaceNumber);
+        self.interfaceClaimed = false;
 
-        self.closeDevice();
+        self.closeDevice(callback);
     });
 };
 
@@ -1092,10 +1115,9 @@ STM32DFU_protocol.prototype.upload_procedure = function (step) {
     }
 };
 
-STM32DFU_protocol.prototype.exitDfu = function () {
+STM32DFU_protocol.prototype.resetDfuDevice = function () {
     const self = this;
     let finished = false;
-    let resetStarted = false;
 
     function finish() {
         if (finished) {
@@ -1103,28 +1125,17 @@ STM32DFU_protocol.prototype.exitDfu = function () {
         }
 
         finished = true;
-        clearTimeout(resetTimer);
         clearTimeout(finishTimer);
         self.cleanup();
     }
 
-    function reset() {
-        if (resetStarted) {
-            return;
-        }
-
-        resetStarted = true;
-        self.resetDevice(finish);
-    }
-
-    const resetTimer = setTimeout(reset, 250);
     const finishTimer = setTimeout(function () {
-        console.log('DFU exit timed out, cleaning up');
+        console.log('DFU reset timed out, cleaning up');
         finish();
     }, 3000);
 
-    // Standard DFU detach request followed by a USB reset exits firmware-launched STM32 DFU without needing firmware hex data.
-    self.controlTransfer('out', self.request.DETACH, 1000, 0, 0, 0, reset, 1000);
+    // Force the DFU USB device to re-enumerate without OS-specific restart helpers or firmware data.
+    self.resetDevice(finish);
 };
 
 STM32DFU_protocol.prototype.leave = function () {
@@ -1158,15 +1169,21 @@ STM32DFU_protocol.prototype.leave = function () {
 STM32DFU_protocol.prototype.cleanup = function () {
     const self = this;
 
-    self.releaseInterface(0);
+    function finish() {
+        GUI.connect_lock = false;
 
-    GUI.connect_lock = false;
+        var timeSpent = new Date().getTime() - self.upload_time_start;
 
-    var timeSpent = new Date().getTime() - self.upload_time_start;
+        console.log('Script finished after: ' + (timeSpent / 1000) + ' seconds');
 
-    console.log('Script finished after: ' + (timeSpent / 1000) + ' seconds');
+        self.callback?.({ success: true });
+    }
 
-    self.callback?.({ success: true });
+    if (self.interfaceClaimed) {
+        self.releaseInterface(0, finish);
+    } else {
+        self.closeDevice(finish);
+    }
 };
 
 // initialize object
