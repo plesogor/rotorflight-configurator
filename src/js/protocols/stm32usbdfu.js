@@ -69,6 +69,7 @@ STM32DFU_protocol.prototype.connect = function (device, hex, options, callback) 
     var self = this;
     self.hex = hex;
     self.callback = callback;
+    self.device = device;
 
     self.options = {
         erase_chip: false,
@@ -96,10 +97,8 @@ STM32DFU_protocol.prototype.connect = function (device, hex, options, callback) 
 
             self.openDevice(result[0], result.slice(1));
         } else {
-            GUI.connect_lock = false;
             console.log('USB DFU not found');
-            GUI.log(i18n.getMessage('stm32UsbDfuNotFound'));
-            self.callback?.({ success: false });
+            self.findAndOpenDevice();
         }
     });
 };
@@ -115,21 +114,47 @@ STM32DFU_protocol.prototype.openDevice = function (device, remainingDevices = []
                 return;
             }
 
-            GUI.connect_lock = false;
-            GUI.log(i18n.getMessage('usbDeviceOpenFail'));
-            if(GUI.operating_system === 'Linux') {
-                GUI.log(i18n.getMessage('usbDeviceUdevNotice'));
-            }
-            self.callback?.({ success: false });
+            self.findAndOpenDevice();
             return;
         }
 
-        self.handle = handle;
-
-        GUI.log(i18n.getMessage('usbDeviceOpened', handle.handle.toString()));
-        console.log('Device opened with Handle ID: ' + handle.handle);
-        self.claimInterface(0);
+        self.onDeviceOpened(handle);
     });
+};
+
+STM32DFU_protocol.prototype.findAndOpenDevice = function () {
+    var self = this;
+
+    if (!chrome.usb.findDevices) {
+        self.openDeviceFailed();
+        return;
+    }
+
+    chrome.usb.findDevices(self.device, function (handles) {
+        if (checkChromeRuntimeError() || !handles?.length) {
+            self.openDeviceFailed();
+            return;
+        }
+
+        self.onDeviceOpened(handles[0]);
+    });
+};
+
+STM32DFU_protocol.prototype.openDeviceFailed = function () {
+    GUI.connect_lock = false;
+    GUI.log(i18n.getMessage('usbDeviceOpenFail'));
+    if(GUI.operating_system === 'Linux') {
+        GUI.log(i18n.getMessage('usbDeviceUdevNotice'));
+    }
+    this.callback?.({ success: false });
+};
+
+STM32DFU_protocol.prototype.onDeviceOpened = function (handle) {
+    this.handle = handle;
+
+    GUI.log(i18n.getMessage('usbDeviceOpened', handle.handle.toString()));
+    console.log('Device opened with Handle ID: ' + handle.handle);
+    this.claimInterface(0);
 };
 
 STM32DFU_protocol.prototype.closeDevice = function () {
