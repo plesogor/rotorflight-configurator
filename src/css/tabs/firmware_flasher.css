@@ -259,7 +259,9 @@
 .tab-firmware_flasher .firmware-helper-status {
     display: none;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: clamp(16px, 4vw, 36px);
+    flex-wrap: wrap;
     font-size: 11px;
     color: #ddd;
 }
@@ -270,10 +272,6 @@
 
 .tab-firmware_flasher .firmware-helper-status .footer-separator {
     opacity: 0.5;
-}
-
-.tab-firmware_flasher .firmware-helper-status .install-dfu-driver {
-    margin-left: clamp(48px, 28vw, 380px);
 }
 
 .tab-firmware_flasher .firmware-helper-status .install-dfu-driver,
