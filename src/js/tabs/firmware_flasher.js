@@ -6,6 +6,7 @@ import { readTextFile, writeTextFile } from '@/js/filesystem.js';
 import * as github from '@/js/GitHubApi.js';
 import { ReleaseChecker } from '@/js/release_checker.js';
 import { manufacturers } from "@/js/manufacturers.js";
+import { exitSTM32DFUWithDfuUtil } from '@/js/utils/dfuUtil.js';
 import {
     checkSTM32DFUDriverInstalled,
     checkSTM32DFUDevicePresent,
@@ -1023,7 +1024,19 @@ tab.initialize = function (callback) {
                         GUI.log(i18n.getMessage('deviceRebooting'));
                         self.flashingMessage(i18n.getMessage('deviceRebooting'), self.FLASH_MESSAGE_TYPES.NEUTRAL);
 
-                        STM32DFU.connect(usbDevices, null, { exitDfu: true }, async function () {
+                        STM32DFU.connect(usbDevices, null, { exitDfu: true }, async function (result) {
+                            if (!result?.success) {
+                                GUI.connect_lock = true;
+                                const dfuUtilResult = await exitSTM32DFUWithDfuUtil();
+                                GUI.connect_lock = false;
+
+                                if (dfuUtilResult.exited) {
+                                    GUI.log(dfuUtilResult.message);
+                                } else {
+                                    GUI.log(`dfu-util DFU leave failed: ${dfuUtilResult.message}`);
+                                }
+                            }
+
                             if (dfuHelperStatusSupported) {
                                 await refreshDfuHelperStatus();
                             }
