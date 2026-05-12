@@ -14,6 +14,56 @@ const path = globalThis.nw
 const STM32_DFU_DEVICE = '0483:df11';
 const STM32_FLASH_ADDRESS = '0x08000000';
 
+function uniqueExistingFirst(candidates) {
+    const unique = [...new Set(candidates.filter(Boolean))];
+    const existing = unique.filter((candidate) => path.isAbsolute(candidate) && fs.existsSync(candidate));
+    const unresolved = unique.filter((candidate) => !existing.includes(candidate));
+
+    return [...existing, ...unresolved];
+}
+
+function getWindowsProgramFilesCandidates(relativePath) {
+    return [
+        process.env.ProgramFiles,
+        process.env['ProgramFiles(x86)'],
+        process.env.ProgramW6432,
+    ].map((root) => root && path.join(root, relativePath));
+}
+
+function getCubeProgrammerCandidates() {
+    const candidates = [
+        process.env.STM32CUBE_PROGRAMMER_CLI,
+        process.env.STM32CUBEPRG_CLI,
+    ];
+
+    switch (GUI.operating_system) {
+        case 'Windows':
+            candidates.push(
+                ...getWindowsProgramFilesCandidates(path.join('STMicroelectronics', 'STM32Cube', 'STM32CubeProgrammer', 'bin', 'STM32_Programmer_CLI.exe')),
+                ...getWindowsProgramFilesCandidates(path.join('STMicroelectronics', 'STM32CubeProgrammer', 'bin', 'STM32_Programmer_CLI.exe')),
+                'STM32_Programmer_CLI.exe'
+            );
+            break;
+        case 'MacOS':
+            candidates.push(
+                '/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI',
+                '/Applications/STMicroelectronics/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI',
+                'STM32_Programmer_CLI'
+            );
+            break;
+        default:
+            candidates.push(
+                '/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI',
+                '/opt/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI',
+                'STM32_Programmer_CLI',
+                'STM32_Programmer.sh'
+            );
+            break;
+    }
+
+    return uniqueExistingFirst(candidates);
+}
+
 function getDfuUtilCandidates() {
     const candidates = [];
 
@@ -27,7 +77,7 @@ function getDfuUtilCandidates() {
 
     candidates.push('dfu-util');
 
-    return [...new Set(candidates)];
+    return uniqueExistingFirst(candidates);
 }
 
 function createEmptyDownloadFile() {
@@ -45,6 +95,35 @@ function removeEmptyDownloadFile(tempDirectory) {
     } catch (error) {
         console.log(`Failed to remove dfu-util temporary file: ${error.message}`);
     }
+}
+
+function isExecutableNotFound(error) {
+    return error.code === 'ENOENT';
+}
+
+function runTool(executable, args) {
+    return new Promise((resolve) => {
+        execFile(
+            executable,
+            args,
+            { timeout: 10000, windowsHide: true },
+            (error, stdout, stderr) => {
+                if (error) {
+                    resolve({
+                        ok: false,
+                        message: stderr || stdout || error.message,
+                        notFound: isExecutableNotFound(error),
+                    });
+                    return;
+                }
+
+                resolve({
+                    ok: true,
+                    message: stdout || stderr,
+                });
+            }
+        );
+    });
 }
 
 function runDfuUtilLeave(executable) {
@@ -70,15 +149,15 @@ function runDfuUtilLeave(executable) {
 
                 if (error) {
                     resolve({
-                        exited: false,
+                        ok: false,
                         message: stderr || stdout || error.message,
-                        notFound: error.code === 'ENOENT',
+                        notFound: isExecutableNotFound(error),
                     });
                     return;
                 }
 
                 resolve({
-                    exited: true,
+                    ok: true,
                     message: stdout || stderr || 'dfu-util leave request completed',
                 });
             }
@@ -86,17 +165,16 @@ function runDfuUtilLeave(executable) {
     });
 }
 
-async function exitSTM32DFUWithDfuUtil() {
+async function tryToolCandidates(toolName, candidates, runner) {
     const failures = [];
 
-    for (const executable of getDfuUtilCandidates()) {
-        const result = await runDfuUtilLeave(executable);
+    for (const executable of candidates) {
+        const result = await runner(executable);
 
-        if (result.exited) {
+        if (result.ok) {
             return {
-                supported: true,
                 exited: true,
-                message: result.message,
+                message: result.message || `${toolName} leave request completed`,
             };
         }
 
@@ -108,12 +186,56 @@ async function exitSTM32DFUWithDfuUtil() {
     }
 
     return {
-        supported: failures.length > 0,
         exited: false,
         message: failures.join('\n'),
     };
 }
 
+async function exitWithCubeProgrammer() {
+    return tryToolCandidates(
+        'STM32CubeProgrammer',
+        getCubeProgrammerCandidates(),
+        (executable) => runTool(executable, ['-c', 'port=USB1', '-s', STM32_FLASH_ADDRESS])
+    );
+}
+
+async function exitWithDfuUtil() {
+    return tryToolCandidates('dfu-util', getDfuUtilCandidates(), runDfuUtilLeave);
+}
+
+async function exitSTM32DFUWithExternalTool() {
+    const cubeProgrammerResult = await exitWithCubeProgrammer();
+
+    if (cubeProgrammerResult.exited) {
+        return {
+            supported: true,
+            exited: true,
+            tool: 'STM32CubeProgrammer',
+            message: cubeProgrammerResult.message,
+        };
+    }
+
+    const dfuUtilResult = await exitWithDfuUtil();
+
+    if (dfuUtilResult.exited) {
+        return {
+            supported: true,
+            exited: true,
+            tool: 'dfu-util',
+            message: dfuUtilResult.message,
+        };
+    }
+
+    return {
+        supported: false,
+        exited: false,
+        message: [
+            `STM32CubeProgrammer: ${cubeProgrammerResult.message}`,
+            `dfu-util: ${dfuUtilResult.message}`,
+        ].join('\n'),
+    };
+}
+
 export {
-    exitSTM32DFUWithDfuUtil,
+    exitSTM32DFUWithExternalTool,
 };

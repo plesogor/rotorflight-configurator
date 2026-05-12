@@ -6,7 +6,7 @@ import { readTextFile, writeTextFile } from '@/js/filesystem.js';
 import * as github from '@/js/GitHubApi.js';
 import { ReleaseChecker } from '@/js/release_checker.js';
 import { manufacturers } from "@/js/manufacturers.js";
-import { exitSTM32DFUWithDfuUtil } from '@/js/utils/dfuUtil.js';
+import { exitSTM32DFUWithExternalTool } from '@/js/utils/dfuUtil.js';
 import {
     checkSTM32DFUDriverInstalled,
     checkSTM32DFUDevicePresent,
@@ -1027,13 +1027,13 @@ tab.initialize = function (callback) {
                         STM32DFU.connect(usbDevices, null, { exitDfu: true }, async function (result) {
                             if (!result?.success) {
                                 GUI.connect_lock = true;
-                                const dfuUtilResult = await exitSTM32DFUWithDfuUtil();
+                                const externalToolResult = await exitSTM32DFUWithExternalTool();
                                 GUI.connect_lock = false;
 
-                                if (dfuUtilResult.exited) {
-                                    GUI.log(dfuUtilResult.message);
+                                if (externalToolResult.exited) {
+                                    GUI.log(externalToolResult.message);
                                 } else {
-                                    GUI.log(`dfu-util DFU leave failed: ${dfuUtilResult.message}`);
+                                    GUI.log(`External DFU leave failed: ${externalToolResult.message}`);
                                 }
                             }
 
