@@ -260,8 +260,10 @@
     display: none;
     align-items: center;
     justify-content: center;
-    gap: clamp(16px, 4vw, 36px);
+    column-gap: clamp(24px, 5vw, 80px);
+    row-gap: 6px;
     flex-wrap: wrap;
+    width: 100%;
     font-size: 11px;
     color: #ddd;
 }
@@ -271,7 +273,12 @@
 }
 
 .tab-firmware_flasher .firmware-helper-status .footer-separator {
-    opacity: 0.5;
+    display: none;
+}
+
+.tab-firmware_flasher .firmware-helper-status > :not(.footer-separator) {
+    flex: 1 1 120px;
+    text-align: center;
 }
 
 .tab-firmware_flasher .firmware-helper-status .install-dfu-driver,
