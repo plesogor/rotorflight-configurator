@@ -817,7 +817,7 @@ tab.initialize = function (callback) {
                     .addClass(driverStatus.installed ? 'ok' : 'error')
                     .text(`DFU Driver: ${driverStatus.installed ? 'Installed' : 'Not Installed'}`);
 
-                installButton.toggleClass('disabled', driverStatus.installed);
+                installButton.removeClass('disabled');
 
                 deviceElement
                     .removeClass('unknown ok warning error')
