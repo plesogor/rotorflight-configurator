@@ -878,7 +878,7 @@ tab.initialize = function (callback) {
             const driverElement = $('.dfu-driver-status');
             const licenseText = getSTM32DFUDriverLicenseText();
             const confirmed = window.confirm(
-                'Install the STM32 WinUSB driver?\n\n' +
+                'Install the STM32 DFU Driver\n\n' +
                     'This will request Windows administrator permission. Select OK only if you accept the license below.\n\n' +
                     licenseText
             );
